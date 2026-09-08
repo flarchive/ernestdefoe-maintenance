@@ -1,0 +1,147 @@
+name: Post release to Flarum support site
+
+on:
+  release:
+    types: [published]
+  # Manual trigger. GitHub refuses to re-run any workflow run older than a
+  # month, so when the support site is unreachable at release time the
+  # announcement is permanently unrecoverable without this — which is exactly
+  # what happened while the site was down.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to announce (e.g. v1.2.0). Defaults to the latest release.'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve the release
+        id: rel
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+          EV_TAG: ${{ github.event.release.tag_name }}
+          EV_NAME: ${{ github.event.release.name }}
+          EV_BODY: ${{ github.event.release.body }}
+          EV_URL: ${{ github.event.release.html_url }}
+        run: |
+          set -euo pipefail
+
+          if [ "$EVENT_NAME" = "release" ]; then
+            TAG="$EV_TAG"; NAME="$EV_NAME"; BODY="$EV_BODY"; URL="$EV_URL"
+          else
+            if [ -n "${INPUT_TAG}" ]; then
+              JSON=$(gh release view "$INPUT_TAG" --json tagName,name,body,url)
+            else
+              JSON=$(gh release view --json tagName,name,body,url)
+            fi
+            TAG=$(printf '%s' "$JSON" | jq -r '.tagName')
+            NAME=$(printf '%s' "$JSON" | jq -r '.name // ""')
+            BODY=$(printf '%s' "$JSON" | jq -r '.body // ""')
+            URL=$(printf '%s' "$JSON" | jq -r '.url')
+          fi
+
+          # Multi-line values have to go through the heredoc form or the step
+          # output is truncated at the first newline.
+          {
+            echo "tag=$TAG"
+            echo "url=$URL"
+            echo "name<<__EOF__"; printf '%s\n' "$NAME"; echo "__EOF__"
+            echo "body<<__EOF__"; printf '%s\n' "$BODY"; echo "__EOF__"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Post reply to support discussion
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FLARUM_FORUM_URL: ${{ vars.FLARUM_FORUM_URL }}
+          FLARUM_DISCUSSION_ID: ${{ vars.FLARUM_DISCUSSION_ID }}
+          FLARUM_API_KEY: ${{ secrets.FLARUM_API_KEY }}
+          RELEASE_TAG: ${{ steps.rel.outputs.tag }}
+          RELEASE_NAME: ${{ steps.rel.outputs.name }}
+          RELEASE_BODY: ${{ steps.rel.outputs.body }}
+          RELEASE_URL: ${{ steps.rel.outputs.url }}
+          REPO_NAME: ${{ github.event.repository.name }}
+        run: |
+          set -euo pipefail
+
+          # 🚨 Skip, do not fail, when the announcement is not configured.
+          # A repository with no support discussion is a normal state — a new
+          # extension, a private one, one that simply is not announced. Exiting
+          # 1 painted a red X on every release of every such repo, which trains
+          # people to ignore the one failure that does matter.
+          if [ -z "${FLARUM_FORUM_URL}" ] || [ -z "${FLARUM_DISCUSSION_ID}" ] || [ -z "${FLARUM_API_KEY}" ]; then
+            echo "::notice::No support discussion configured for this repository — skipping the announcement. Set the FLARUM_FORUM_URL and FLARUM_DISCUSSION_ID variables and the FLARUM_API_KEY secret to enable it."
+            exit 0
+          fi
+
+          CONTENT_MD=$(printf '## %s %s\\n\\n%s\\n\\n[View release on GitHub](%s)\\n' \\
+            "$REPO_NAME" "$RELEASE_TAG" "${RELEASE_BODY:-_No release notes provided._}" "$RELEASE_URL")
+
+          # 🚨 Render to HTML before posting. Release notes are Markdown and the
+          # support site has no Markdown extension, so posting the raw source
+          # published literal "##" and "**bold**" as the announcement body.
+          # Falls back to the source if the render fails.
+          #
+          # 🚨 Two attempts, then a LOUD fallback.
+          #
+          # This used to discard stderr and fall back silently, so a failed
+          # render published literal "##" and "**bold**" to the support site
+          # with nothing anywhere saying it had happened — page-builder 3.5.0
+          # is still sitting there like that. A fallback nobody can see is
+          # indistinguishable from working, which is how it survived.
+          #
+          # 🚨 The line below also carried TWO backslashes instead of one in
+          # this repo. The shell reads "\" as an escaped backslash rather than
+          # a line continuation, so the next line began with a bare "|" — a
+          # syntax error that aborted the whole step. The announcer here has
+          # never once posted; it failed on every release.
+          CONTENT=""
+          for attempt in 1 2; do
+            if CONTENT=$(jq -n --arg text "$CONTENT_MD" '{text:$text, mode:"gfm"}' \
+                 | gh api --method POST /markdown --input - 2>/tmp/md-render-err.txt) \
+               && [ -n "$CONTENT" ]; then
+              break
+            fi
+            CONTENT=""
+            if [ "$attempt" = "1" ]; then sleep 3; fi
+          done
+
+          if [ -z "$CONTENT" ]; then
+            # Still posted, because a rough announcement beats none — but the run
+            # is now marked so somebody can go and fix the post.
+            echo "::warning title=Markdown render failed::Posting the Markdown SOURCE, which this site does not render — the announcement will contain literal ## and **. $(head -c 300 /tmp/md-render-err.txt 2>/dev/null | tr -s '[:space:]' ' ')"
+            CONTENT="$CONTENT_MD"
+          fi
+
+          # 🚨 <tt> is not in Scribe's allowed vocabulary, so the site ESCAPES it
+          # and the announcement shows a literal "&lt;tt&gt;" to every reader.
+          # GitHub's GFM renderer emits it unprompted: a bare compare URL is
+          # autolinked as <a class="commit-link">owner/repo@<tt>a...b</tt></a>,
+          # which is exactly the "Full Changelog" line release notes end with.
+          # <code> renders identically and is allowed.
+          CONTENT=$(printf '%s' "$CONTENT" | sed -e 's|<tt>|<code>|g' -e 's|</tt>|</code>|g')
+
+          PAYLOAD=$(jq -n \
+            --arg content "$CONTENT" \
+            --arg did "$FLARUM_DISCUSSION_ID" \
+            '{data:{type:"posts",attributes:{content:$content},relationships:{discussion:{data:{type:"discussions",id:$did}}}}}')
+
+          HTTP_CODE=$(curl -sS -o /tmp/flarum-resp.json -w '%{http_code}' \
+            -X POST "${FLARUM_FORUM_URL%/}/api/posts" \
+            -H "Authorization: Token ${FLARUM_API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD")
+
+          echo "Flarum responded with HTTP $HTTP_CODE"
+          cat /tmp/flarum-resp.json
+          if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ]; then
+            exit 1
+          fi
