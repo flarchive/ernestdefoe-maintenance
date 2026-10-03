@@ -2,13 +2,19 @@
 
 > **Read-only archive of released versions of ernestdefoe/maintenance.** Not for installation: use [Packagist](https://packagist.org/packages/ernestdefoe/maintenance) or the [upstream repository](https://github.com/ernestdefoe/maintenance).
 
-**0** versions archived · Latest: [`1.1.5`](https://github.com/flarchive/ernestdefoe-maintenance/tree/archive/v1.1.5) · License: `MIT` · Flarum: `^2.0`
+**7** versions archived · Latest: [`1.1.5`](https://github.com/flarchive/ernestdefoe-maintenance/tree/archive/v1.1.5) · License: `MIT` · Flarum: `^2.0`
 
 ## Archived Versions
 
 | Version | Released | Flarum | Source |
 |---|---|---|---|
-| — | — | — | — |
+| `1.1.3` | 2026-09-04 | `^2.0` | [Browse](https://github.com/flarchive/ernestdefoe-maintenance/tree/archive/v1.1.3) |
+| `1.1.4` | 2026-09-08 | `^2.0` | [Browse](https://github.com/flarchive/ernestdefoe-maintenance/tree/archive/v1.1.4) |
+| `1.1.5` | 2026-09-11 | `^2.0` | [Browse](https://github.com/flarchive/ernestdefoe-maintenance/tree/archive/v1.1.5) |
+| `v1.0.0` | 2026-07-05 | `^2.0` | [Browse](https://github.com/flarchive/ernestdefoe-maintenance/tree/archive/v1.0.0) |
+| `v1.1.0` | 2026-08-30 | `^2.0` | [Browse](https://github.com/flarchive/ernestdefoe-maintenance/tree/archive/v1.1.0) |
+| `v1.1.1` | 2026-09-01 | `^2.0` | [Browse](https://github.com/flarchive/ernestdefoe-maintenance/tree/archive/v1.1.1) |
+| `v1.1.2` | 2026-09-01 | `^2.0` | [Browse](https://github.com/flarchive/ernestdefoe-maintenance/tree/archive/v1.1.2) |
 
 Catalog entry: [packages/ernestdefoe-maintenance.json](https://github.com/flarchive/archive-index/blob/main/packages/ernestdefoe-maintenance.json)
 
